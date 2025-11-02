@@ -62,6 +62,8 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
   const [basePriceFromAge, setBasePriceFromAge] = useState(0);
   const [warrantyPrices, setWarrantyPrices] = useState<any>(null);
   const [loadingPrices, setLoadingPrices] = useState(false);
+  const [conditionDeductions, setConditionDeductions] = useState<Record<string, number>>({});
+  const [conditionDeduction, setConditionDeduction] = useState(0);
 
   const callsRef = useRef<HTMLDivElement>(null);
   const touchRef = useRef<HTMLDivElement>(null);
@@ -81,9 +83,9 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
     }
   }, [brandName, isAppleBrand, isBatteryHealthy]);
 
-  // Fetch warranty prices
+  // Fetch warranty prices and condition deductions
   useEffect(() => {
-    const fetchWarrantyPrices = async () => {
+    const fetchPricingData = async () => {
       if (!variantId) {
         console.error('❌ No variantId provided!');
         return;
@@ -91,7 +93,7 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
 
       console.log('🔍 Fetching warranty prices for variant:', variantId);
       setLoadingPrices(true);
-      
+
       try {
         const { data, error } = await supabase
           .from("warranty_prices")
@@ -116,15 +118,37 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
       }
     };
 
-    fetchWarrantyPrices();
+    const fetchConditionDeductions = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("condition_deductions")
+          .select("condition_type, deduction_percentage");
+
+        if (error) {
+          console.error("❌ Error fetching condition deductions:", error);
+        } else if (data && data.length > 0) {
+          const deductionMap: Record<string, number> = {};
+          data.forEach((row: any) => {
+            deductionMap[row.condition_type] = parseFloat(row.deduction_percentage);
+          });
+          console.log('✅ Condition deductions loaded:', deductionMap);
+          setConditionDeductions(deductionMap);
+        }
+      } catch (err) {
+        console.error('❌ Exception fetching condition deductions:', err);
+      }
+    };
+
+    fetchPricingData();
+    fetchConditionDeductions();
   }, [variantId]);
 
-  // Update price when age group changes
+  // Update price when age group or condition changes
   useEffect(() => {
     if (ageGroup && warrantyPrices) {
       updatePrice();
     }
-  }, [ageGroup, warrantyPrices]);
+  }, [ageGroup, warrantyPrices, overallCondition, conditionDeductions]);
 
   // Recalculate price when accessories change
   useEffect(() => {
@@ -211,6 +235,19 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
     console.log('💰 Base price from age group:', roundedPrice);
     setBasePriceFromAge(roundedPrice);
     setFinalPrice(roundedPrice);
+
+    // Apply condition deduction if condition is selected
+    if (overallCondition && conditionDeductions[overallCondition] !== undefined) {
+      const deductionPercentage = conditionDeductions[overallCondition];
+      const deductionAmount = roundedPrice * (deductionPercentage / 100);
+      const priceAfterConditionDeduction = roundedPrice - deductionAmount;
+      setConditionDeduction(deductionPercentage);
+      console.log(`📉 Condition deduction (${overallCondition}): ${deductionPercentage}% = ₹${Math.round(deductionAmount)}`);
+      console.log(`💰 Price after condition deduction: ₹${Math.round(priceAfterConditionDeduction)}`);
+      setFinalPrice(Math.round(priceAfterConditionDeduction));
+    } else {
+      setConditionDeduction(0);
+    }
   };
 
   const calculateFinalPriceWithDeductions = () => {
@@ -488,22 +525,30 @@ const ConditionQuestions = ({ basePrice, deviceName, releaseDate, variantId, bra
               <div className="space-y-6 text-center">
                 <h2 className="text-2xl font-bold" style={{ color: 'black' }}>What is the overall condition of your phone?</h2>
                 <div className="space-y-3">
-                  {conditionOptions.map(option => (
-                    <Button
-                      key={option.value}
-                      onClick={() => handleConditionSelect(option.value)}
-                      className={`w-full px-6 py-4 text-left justify-start h-auto transition-all duration-200 ${overallCondition !== option.value ? "bg-muted/30 hover:bg-muted" : ""}`}
-                      style={{
-                        backgroundColor: overallCondition === option.value ? 'royalBlue' : '',
-                        color: overallCondition === option.value ? 'white' : 'black'
-                      }}
-                    >
-                      <div>
-                        <div className="font-semibold">{option.label}</div>
-                        <div className="text-sm opacity-75">{option.description}</div>
-                      </div>
-                    </Button>
-                  ))}
+                  {conditionOptions.map(option => {
+                    const deductionPercentage = conditionDeductions[option.value] ?? 0;
+                    return (
+                      <Button
+                        key={option.value}
+                        onClick={() => handleConditionSelect(option.value)}
+                        className={`w-full px-6 py-4 text-left justify-start h-auto transition-all duration-200 ${overallCondition !== option.value ? "bg-muted/30 hover:bg-muted" : ""}`}
+                        style={{
+                          backgroundColor: overallCondition === option.value ? 'royalBlue' : '',
+                          color: overallCondition === option.value ? 'white' : 'black'
+                        }}
+                      >
+                        <div className="w-full">
+                          <div className="font-semibold">{option.label}</div>
+                          <div className="text-sm opacity-75">{option.description}</div>
+                          {deductionPercentage > 0 && (
+                            <div className="text-xs mt-2 font-medium">
+                              {deductionPercentage}% deduction on price
+                            </div>
+                          )}
+                        </div>
+                      </Button>
+                    );
+                  })}
                 </div>
               </div>
             </Card>
